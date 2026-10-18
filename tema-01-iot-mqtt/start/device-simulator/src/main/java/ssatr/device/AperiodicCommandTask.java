@@ -1,5 +1,6 @@
 package ssatr.device;
 
+import java.util.Locale;
 import java.util.concurrent.BlockingQueue;
 
 /**
@@ -37,14 +38,50 @@ public class AperiodicCommandTask implements Runnable {
 
     @Override
     public void run() {
-        // TODO 3: implementați taskul aperiodic:
-        //   - preluați comenzile din coadă: commands.take()
-        //   - separați numele comenzii de parametru: command.split(" ")
-        //   - executați comanda (periodic.setPeriodMs(...), sensor.reset() etc.)
-        //   - publicați confirmarea pe Config.statusTopic(deviceId)
-        //   - o comandă necunoscută sau un parametru invalid nu trebuie să
-        //     oprească taskul: publicați "ERROR <motiv>"
-        //
-        // Vezi exemplul exemple/01-taskuri/.../AperiodicTaskExample.java
+        try {
+            while (true) {
+                String command = commands.take().trim();   // fiecare comandă eliberează un job
+
+                String reply;
+                try {
+                    reply = execute(command);
+                } catch (Exception e) {
+                    // parametru invalid (de ex. "SET_INTERVAL abc"): taskul nu se oprește
+                    reply = "ERROR parametru invalid: " + command;
+                }
+
+                mqtt.publish(Config.statusTopic(deviceId),
+                        deviceId + ";" + System.currentTimeMillis() + ";" + reply);
+                System.out.println("[aperiodic] " + command + " -> " + reply);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Execută o comandă și întoarce confirmarea ("OK ..." sau "ERROR ..."). */
+    private String execute(String command) {
+        String[] parts = command.split(" ");
+
+        switch (parts[0]) {
+            case "SET_INTERVAL":
+                long ms = Long.parseLong(parts[1]);
+                if (ms <= 0) {
+                    return "ERROR intervalul trebuie sa fie pozitiv: " + ms;
+                }
+                periodic.setPeriodMs(ms);
+                return "OK SET_INTERVAL " + ms;
+            case "SET_THRESHOLD":
+                periodic.setThreshold(Double.parseDouble(parts[1]));
+                return "OK SET_THRESHOLD " + parts[1];
+            case "RESET":
+                sensor.reset();
+                return "OK RESET";
+            case "STATUS":
+                return String.format(Locale.US, "OK STATUS interval=%d prag=%.2f",
+                        periodic.getPeriodMs(), periodic.getThreshold());
+            default:
+                return "ERROR comanda necunoscuta: " + parts[0];
+        }
     }
 }

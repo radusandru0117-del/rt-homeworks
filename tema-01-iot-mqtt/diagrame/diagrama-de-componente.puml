@@ -1,0 +1,90 @@
+@startuml diagrama-de-componente
+' Diagrama de componente a sistemului IoT (Tema 01)
+' Randare: java -jar plantuml.jar diagrama-de-componente.puml
+skinparam componentStyle uml2
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam component {
+  BackgroundColor #DAE8FC
+  BorderColor #6C8EBF
+}
+skinparam package {
+  BackgroundColor #F8F8F8
+  BorderColor #888888
+}
+skinparam interface {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+left to right direction
+title Diagramă de componente – aplicația IoT (Tema 01)
+
+actor "Operator" as OP
+
+package "device-simulator (Java, câte o instanță per device)" as DEV {
+  [TemperatureSensor] as SENS
+  [PeriodicTelemetryTask\n«task periodic»] as PER
+  [SporadicAlarmTask\n«task sporadic»] as SPO
+  [AperiodicCommandTask\n«task aperiodic»] as APE
+  [MqttConnection] as DMQ
+  () "alarmEvents\nBlockingQueue<AlarmEvent>" as QA
+  () "commands\nBlockingQueue<String>" as QC
+  () "ISenzor\nread() / reset()" as ISENS
+  () "IParametri\nsetPeriodMs() / setThreshold()" as IPAR
+}
+
+component "Broker MQTT\ncontrol.aut.utcluj.ro:11188" as BRK
+() "MQTT publish/subscribe\nssatr/sandru-radu/devices/<id>/..." as IMQTT
+
+package "business-service (Java)" as SRV {
+  [MqttConnection] as SMQ
+  [MessageProcessor ×3\n(telemetry / alarm / status)] as MP
+  [Dashboard] as DSH
+  [CsvStorage] as CSV
+  [CommandConsole] as CC
+  () "inbox-uri\nBlockingQueue<String> ×3" as QIN
+  () "IStocare\nappend(kind, mesaj)" as ISTO
+  () "IStare\nupdate*() / print()" as ISTARE
+  database "data/telemetry.csv\ndata/alarm.csv\ndata/status.csv" as FILES
+}
+
+' --- broker: oferă interfața MQTT, folosită de ambele aplicații
+BRK -- IMQTT
+DMQ --( IMQTT
+SMQ --( IMQTT
+
+' --- interiorul device-ului
+SENS -- ISENS
+PER --( ISENS
+APE --( ISENS
+PER -- IPAR
+APE --( IPAR
+PER --> QA : put
+QA --> SPO : take
+DMQ --> QC : comenzi primite
+QC --> APE : take
+PER ..> DMQ : publish telemetry
+SPO ..> DMQ : publish alarm
+APE ..> DMQ : publish status
+
+' --- interiorul serviciului
+SMQ --> QIN : mesaje primite
+QIN --> MP : take
+CSV -- ISTO
+MP --( ISTO
+DSH -- ISTARE
+MP --( ISTARE
+CC --( ISTARE
+CC ..> SMQ : publish commands
+CSV --> FILES
+
+OP --> CC : linii de comandă\n(show, device-1 SET_INTERVAL 1000)
+
+legend bottom left
+  **Notație**
+  • dreptunghi «component»: o parte a sistemului care se poate înlocui independent
+  • bila (○): interfața pe care o //oferă// componenta; semicercul (⊂): interfața pe care o //folosește//
+  • săgeată plină: transfer de date prin coadă; săgeată punctată: dependență (folosește)
+  Device-urile și serviciul nu comunică direct, ci doar prin broker (publish/subscribe pe topic-uri).
+endlegend
+@enduml

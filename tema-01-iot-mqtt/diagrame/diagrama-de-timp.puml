@@ -1,0 +1,112 @@
+@startuml diagrama-de-timp
+' Diagrama de timp: cele trei taskuri ale device-ului pe ~10 s
+' Randare: java -jar plantuml.jar diagrama-de-timp.puml
+'
+' Scenariu (valori în ms):
+'   - taskul periodic pornește cu T = 1000, prag = 28.00
+'   - la r = 2000 temperatura 29.14 > 28 -> alarmă ACCEPTATĂ (prima alarmă)
+'   - la r = 3000 temperatura 28.60 > 28 -> alarmă RESPINSĂ (1000 < 5000)
+'   - la t = 5400 sosește comanda SET_INTERVAL 2000 (job aperiodic)
+'     jobul de la r = 6000 citește noua perioadă -> următoarea eliberare la 8000
+'   - la r = 8000 temperatura 28.90 > 28 -> alarmă ACCEPTATĂ (6000 >= 5000)
+skinparam defaultFontName Arial
+skinparam shadowing false
+scale 1000 as 170 pixels
+title Diagramă de timp – taskurile device-ului pe un interval de 10 s
+
+robust "τ1 periodic\nPeriodicTelemetryTask\nT = 1000 ms, apoi 2000 ms" as P
+robust "τ2 sporadic\nSporadicAlarmTask\ninterval minim 5000 ms" as S
+robust "τ3 aperiodic\nAperiodicCommandTask" as A
+P has Running,Blocat
+S has Running,Blocat
+A has Running,Blocat
+
+@0
+P is Running
+S is Blocat
+A is Blocat
+@150
+P is Blocat
+
+@1000
+P is Running
+@1150
+P is Blocat
+
+@2000
+P is Running
+@2150
+P is Blocat
+S is Running
+@2300
+S is Blocat
+
+@3000
+P is Running
+@3150
+P is Blocat
+
+@4000
+P is Running
+@4150
+P is Blocat
+
+@5000
+P is Running
+@5150
+P is Blocat
+
+@5400
+A is Running
+@5550
+A is Blocat
+
+@6000
+P is Running
+@6150
+P is Blocat
+
+@8000
+P is Running
+@8150
+P is Blocat
+S is Running
+@8300
+S is Blocat
+
+@10000
+P is Running
+@10150
+P is Blocat
+
+' --- grila periodică și schimbarea perioadei
+P@0 <-> @1000 : T = 1000
+P@3000 <-> @4000 : T = 1000
+P@6000 <-> @8000 : T = 2000 (citit după jobul 6)
+P@8000 <-> @10000 : T = 2000
+
+' --- evenimentele sporadice
+P@2150 -> S@2150 : alarmă
+P@3150 -> S@3150 : ✗ respinsă
+S@2150 <-> @3150 : 1000 ms < 5000
+S@2150 <-> @8150 : 6000 ms ≥ 5000 → acceptată
+P@8150 -> S@8150 : alarmă
+
+' --- jobul aperiodic modifică perioada taskului periodic
+A@5550 -> P@6150 : setPeriodMs(2000)
+
+highlight 3150 to 3300 #FFCCCC;line:DimGrey : eveniment\nrespins
+highlight 5400 to 5550 #E1D5E7;line:DimGrey : comandă\nsosită
+
+legend bottom left
+  **Legendă**
+  • nivel Running: un job care rulează; nivel Blocat: thread-ul așteaptă (sleepUntil pentru τ1, take() pentru τ2 și τ3).
+  • eliberările taskului periodic sunt pe grilă: r_k = r_(k-1) + T (așteptare absolută); jobul 6 citește noua perioadă,
+    deci după r = 6000 urmează r = 8000, apoi 10000.
+  • săgeată τ1 → τ2: eveniment de alarmă pus în coada alarmEvents (temperatură > prag 28: 29.14 la r = 2000, 28.60 la r = 3000, 28.90 la r = 8000);
+    evenimentul de la t = 3150 este respins: au trecut doar 1000 ms de la ultima alarmă acceptată (minim 5000 ms).
+  • τ3 este eliberat de sosirea comenzii SET_INTERVAL 2000 (t = 5400), fără interval minim între sosiri.
+  • durata joburilor (C ≈ 1–3 ms măsurat) este desenată mărită (150 ms) ca să fie vizibilă; pe un procesor
+    multicore cele trei thread-uri nu se preemptează reciproc, deci stările Ready lipsesc.
+endlegend
+@enduml

@@ -1,0 +1,67 @@
+@startuml diagrama-de-secventa-alarma
+' Scenariul 1: o telemetrie depășește pragul și produce o alarmă
+' Randare: java -jar plantuml.jar diagrama-de-secventa-alarma.puml
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam participant {
+  BackgroundColor #DAE8FC
+  BorderColor #6C8EBF
+}
+skinparam queue {
+  BackgroundColor #FFF2CC
+  BorderColor #D6B656
+}
+autonumber
+title Diagramă de secvență – scenariul 1: telemetria depășește pragul și produce o alarmă
+
+box "device-simulator (device-1)" #F5F9FF
+  participant "PeriodicTelemetryTask\n«periodic»" as PER
+  participant "TemperatureSensor" as SENS
+  queue "alarmEvents" as QA
+  participant "SporadicAlarmTask\n«sporadic»" as SPO
+  participant "MqttConnection" as DMQ
+end box
+participant "Broker MQTT" as BRK
+box "business-service" #F5FFF5
+  participant "MessageProcessor\n(telemetry)" as MPT
+  participant "MessageProcessor\n(alarm)" as MPA
+  participant "CsvStorage" as CSV
+  participant "Dashboard" as DSH
+end box
+
+note over PER : eliberarea jobului k\npe grila r_k = r_(k-1) + T
+PER -> SENS : read()
+SENS --> PER : 29.14
+PER -> DMQ : publish(telemetry, "device-1;t;29.14")
+DMQ ->> BRK : PUBLISH .../device-1/telemetry (QoS 1)
+BRK ->> MPT : PUBLISH (abonament .../+/telemetry)\n→ inbox telemetry
+note right of PER : 29.14 > prag 28.00
+PER ->> QA : put(AlarmEvent(29.14, 28.00))
+note over PER : așteaptă până la r_(k+1)\n(așteptare absolută)
+
+QA -> SPO : take()
+alt au trecut ≥ MIN_INTERARRIVAL_MS (5000 ms) de la ultima alarmă acceptată
+  SPO -> DMQ : publish(alarm, "device-1;t;29.14;28.00")
+  DMQ ->> BRK : PUBLISH .../device-1/alarm (QoS 1)
+  BRK ->> MPA : PUBLISH (abonament .../+/alarm)\n→ inbox alarm
+else evenimentul a sosit prea devreme
+  SPO -> SPO : respinge evenimentul\n(nu publică nimic)
+end
+
+par thread "telemetry"
+  MPT -> CSV : append("telemetry", mesaj)
+  MPT -> DSH : updateTelemetry("device-1", 29.14)
+else thread "alarm" (doar dacă alarma a fost publicată)
+  MPA -> CSV : append("alarm", mesaj)
+  MPA -> DSH : updateAlarm("device-1")
+  MPA -> MPA : afișează imediat\n">>> ALARMĂ de la device-1 ..."
+end
+
+legend bottom left
+  săgeată plină cu vârf plin: apel sincron; săgeată punctată: răspuns;
+  vârf deschis (->>): mesaj asincron (publish MQTT, put în coadă).
+  Taskul periodic nu așteaptă tratarea alarmei: doar pune evenimentul în coadă.
+endlegend
+@enduml

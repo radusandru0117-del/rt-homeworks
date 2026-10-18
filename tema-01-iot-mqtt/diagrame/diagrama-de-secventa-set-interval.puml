@@ -1,0 +1,65 @@
+@startuml diagrama-de-secventa-set-interval
+' Scenariul 2: operatorul trimite SET_INTERVAL, iar device-ul confirmă
+' Randare: java -jar plantuml.jar diagrama-de-secventa-set-interval.puml
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam participant {
+  BackgroundColor #DAE8FC
+  BorderColor #6C8EBF
+}
+skinparam queue {
+  BackgroundColor #FFF2CC
+  BorderColor #D6B656
+}
+autonumber
+title Diagramă de secvență – scenariul 2: operatorul trimite SET_INTERVAL, device-ul confirmă
+
+actor "Operator" as OP
+box "business-service" #F5FFF5
+  participant "CommandConsole" as CC
+  participant "MqttConnection" as SMQ
+  participant "MessageProcessor\n(status)" as MPS
+  participant "CsvStorage" as CSV
+  participant "Dashboard" as DSH
+end box
+participant "Broker MQTT" as BRK
+box "device-simulator (device-1)" #F5F9FF
+  participant "MqttConnection" as DMQ
+  queue "commands" as QC
+  participant "AperiodicCommandTask\n«aperiodic»" as APE
+  participant "PeriodicTelemetryTask\n«periodic»" as PER
+end box
+
+OP -> CC : "device-1 SET_INTERVAL 1000"
+CC -> CC : split → deviceId = "device-1",\ncomanda = "SET_INTERVAL 1000"
+CC -> SMQ : publish(commandTopic("device-1"), "SET_INTERVAL 1000")
+SMQ ->> BRK : PUBLISH .../device-1/commands (QoS 1)
+CC --> OP : "Trimis către device-1: SET_INTERVAL 1000"
+
+BRK ->> DMQ : PUBLISH (abonament .../device-1/commands)
+DMQ ->> QC : put("SET_INTERVAL 1000")
+QC -> APE : take()  — eliberarea unui job aperiodic
+APE -> APE : parsează și validează\n(1000 ∈ [100, 3600000])
+APE -> PER : setPeriodMs(1000)
+note right of PER : câmp volatile; noua perioadă\nse aplică de la următoarea eliberare
+APE -> DMQ : publish(statusTopic, "device-1;t;OK SET_INTERVAL 1000")
+DMQ ->> BRK : PUBLISH .../device-1/status (QoS 1)
+
+BRK ->> SMQ : PUBLISH (abonament .../+/status)
+SMQ ->> MPS : put în inbox status
+MPS -> CSV : append("status", mesaj)
+MPS -> DSH : updateStatus("device-1")
+MPS --> OP : afișează imediat "<<< device-1: OK SET_INTERVAL 1000"
+
+opt comandă greșită (de ex. SET_INTERVAL abc)
+  APE -> DMQ : publish(statusTopic, "device-1;t;ERROR parametru invalid: SET_INTERVAL abc")
+  note over APE : taskul nu se oprește,\nașteaptă următoarea comandă
+end
+
+legend bottom left
+  săgeată plină cu vârf plin: apel sincron; săgeată punctată: răspuns;
+  vârf deschis (->>): mesaj asincron (publish MQTT, put în coadă).
+endlegend
+@enduml
