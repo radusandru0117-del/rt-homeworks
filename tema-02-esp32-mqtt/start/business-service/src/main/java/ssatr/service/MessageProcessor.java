@@ -27,12 +27,35 @@ public class MessageProcessor implements Runnable {
 
     @Override
     public void run() {
-        // TODO 4: într-o buclă:
-        //   - preluați un mesaj: inbox.take()
-        //   - salvați mesajul în fișierul CSV: storage.append(kind, mesaj)
-        //     (CsvStorage este gata implementată)
-        //   - actualizați dashboard-ul, în funcție de kind
-        //   - alarmele și confirmările se afișează imediat în consolă
-        //   - un mesaj greșit (format invalid) nu trebuie să oprească thread-ul
+        try {
+            while (true) {
+                String message = inbox.take();
+                storage.append(kind, message);   // salvat exact cum a sosit
+
+                try {
+                    String[] f = message.split(";", 3);   // deviceId ; timestamp ; restul
+                    String deviceId = f[0];
+
+                    switch (kind) {
+                        case "telemetry":
+                            dashboard.updateTelemetry(deviceId, Double.parseDouble(f[2]));
+                            break;
+                        case "alarm":
+                            dashboard.updateAlarm(deviceId);
+                            System.out.println(">>> ALARMĂ: " + message);
+                            break;
+                        case "status":
+                            dashboard.updateStatus(deviceId);
+                            System.out.println("<<< " + deviceId + ": " + f[2]);
+                            break;
+                    }
+                } catch (Exception e) {
+                    // un mesaj greșit nu oprește thread-ul
+                    System.out.println("[" + kind + "] mesaj invalid ignorat: " + message);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
